@@ -11,6 +11,16 @@
 const SPREADSHEET_ID = '';
 
 const SHEET_NAME = 'Registrations';
+
+// ---- รายชื่อผู้มีสิทธิ์สมัคร ----
+// true  = เฉพาะรหัสนักเรียนที่อยู่ในชีต AllowedStudents เท่านั้นจึงสมัครได้
+// false = ใครก็สมัครได้ (ไม่ตรวจรายชื่อ)
+const REQUIRE_ALLOWED_LIST = true;
+const ALLOWED_SHEET = 'AllowedStudents';
+
+// รหัส PIN ตรวจที่ฝั่งเซิร์ฟเวอร์ (ไม่อยู่ในหน้าเว็บ) ควรเปลี่ยนเป็นรหัสของคุณเอง
+const ADMIN_PIN = 'br113';   // เพิ่ม/แก้ไข/ลบข้อมูลได้
+const ADVISOR_PIN = 'br112'; // ดูและส่งออกรายงานเท่านั้น
 const MAX_QUOTA = 35; // โควตาต่อวิชา ต้องตรงกับ maxQuota ใน index.html
 
 // ลำดับคอลัมน์ในชีต: id, name, class, email, courseCode, timestamp
@@ -27,6 +37,9 @@ const VALID_COURSES = [
 
 function doGet(e) {
   try {
+    const p = (e && e.parameter) || {};
+    if (p.action === 'check') return json_(checkAllowed_(normId_(p.id)));
+
     // ใช้ข้อมูลจากแคชถ้ามี (ตอบเร็วขึ้นมากเมื่อมีคนเปิดเว็บพร้อมกันหลายคน)
     const cached = cacheGet_();
     if (cached) {
@@ -41,6 +54,16 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  } catch (err) {
+    return json_({ status: 'error', message: 'ข้อมูลที่ส่งมาไม่ถูกต้อง' });
+  }
+
+  // ตรวจ PIN ไม่ต้องรอคิวล็อก
+  if (body.action === 'auth') return json_(auth_(body.pin));
+
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000); // กันหลายคนกดลงทะเบียนพร้อมกันแล้วโควตาเกิน
@@ -50,7 +73,6 @@ function doPost(e) {
   }
 
   try {
-    const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     let result;
     switch (body.action) {
       case 'register': result = register_(body); break;
@@ -71,6 +93,21 @@ function doPost(e) {
 
 function register_(d) {
   const s = clean_(d);
+
+  // นักเรียนทั่วไปต้องอยู่ในรายชื่อผู้มีสิทธิ์ (แอดมินที่ส่ง PIN ถูกต้องข้ามได้)
+  if (REQUIRE_ALLOWED_LIST && !isAdmin_(d.pin)) {
+    const a = getAllowed_()[s.id];
+    if (!a) {
+      return {
+        status: 'error',
+        code: 'NOT_ALLOWED',
+        message: 'รหัสนักเรียน ' + s.id + ' ไม่อยู่ในรายชื่อผู้มีสิทธิ์สมัคร กรุณาติดต่อครูผู้ดูแล'
+      };
+    }
+    if (a.name) s.name = a.name;     // ใช้ชื่อและห้องจากรายชื่อจริง กันกรอกผิดหรือสวมรอย
+    if (a.class) s.class = a.class;
+  }
+
   const err = validate_(s);
   if (err) return { status: 'error', message: err };
 
@@ -89,6 +126,7 @@ function register_(d) {
 }
 
 function update_(d) {
+  if (!isAdmin_(d.pin)) return forbidden_();
   const s = clean_(d);
   const origId = String(d.origId || '').trim();
   const err = validate_(s);
@@ -112,6 +150,7 @@ function update_(d) {
 }
 
 function delete_(d) {
+  if (!isAdmin_(d.pin)) return forbidden_();
   const id = String(d.id || '').trim();
   const rows = readAll_();
   const idx = rows.findIndex(r => r.id === id);
@@ -123,13 +162,17 @@ function delete_(d) {
 
 /* ---------- Helpers ---------- */
 
+function getSpreadsheet_() {
+  return SPREADSHEET_ID
+    ? SpreadsheetApp.openById(SPREADSHEET_ID)
+    : SpreadsheetApp.getActiveSpreadsheet();
+}
+
 let _sheet = null; // เก็บไว้ใช้ซ้ำภายในการรันครั้งเดียว
 
 function getSheet_() {
   if (_sheet) return _sheet;
-  const ss = SPREADSHEET_ID
-    ? SpreadsheetApp.openById(SPREADSHEET_ID)
-    : SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet_();
 
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
@@ -189,44 +232,109 @@ function countInCourse_(rows, code) {
   return rows.filter(r => r.courseCode === code).length;
 }
 
-/* ---------- Cache (เก็บคำตอบของ doGet ชั่วคราว) ---------- */
+/* ---------- สิทธิ์และรายชื่อผู้มีสิทธิ์สมัคร ---------- */
+
+function isAdmin_(pin) {
+  return !!pin && String(pin) === ADMIN_PIN;
+}
+
+function auth_(pin) {
+  pin = String(pin || '');
+  if (pin === ADMIN_PIN) return { status: 'success', role: 'admin' };
+  if (pin === ADVISOR_PIN) return { status: 'success', role: 'advisor' };
+  return { status: 'error', message: 'รหัส PIN ไม่ถูกต้อง' };
+}
+
+function forbidden_() {
+  return { status: 'error', code: 'FORBIDDEN', message: 'ไม่มีสิทธิ์ดำเนินการ (ต้องเข้าสู่ระบบแอดมิน)' };
+}
+
+// รหัสนักเรียน: ตัดช่องว่าง และเติม 0 ข้างหน้าถ้าเป็นตัวเลขไม่ครบ 5 หลัก (กรณี Sheets ตัดเลข 0 ออก)
+function normId_(v) {
+  const t = String(v == null ? '' : v).trim();
+  return /^\d{1,5}$/.test(t) ? ('00000' + t).slice(-5) : t;
+}
+
+function getAllowedSheet_() {
+  const ss = getSpreadsheet_();
+  let sheet = ss.getSheetByName(ALLOWED_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(ALLOWED_SHEET);
+    sheet.getRange(1, 1, 1, 3).setValues([['รหัสนักเรียน', 'ชื่อ-นามสกุล (ไม่บังคับ)', 'ห้องเรียน เช่น ม.4/3 (ไม่บังคับ)']]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, sheet.getMaxRows(), 3).setNumberFormat('@');
+  }
+  return sheet;
+}
+
+// คืนค่า { '45890': {name, class}, ... }
+function getAllowed_() {
+  const KEY = 'allowed_v1';
+  let raw = cacheGetKey_(KEY);
+  if (!raw) {
+    const sheet = getAllowedSheet_();
+    const last = sheet.getLastRow();
+    const list = last < 2 ? [] : sheet.getRange(2, 1, last - 1, 3).getValues()
+      .map(r => [normId_(r[0]), String(r[1] || '').trim(), String(r[2] || '').trim()])
+      .filter(r => r[0] !== '');
+    raw = JSON.stringify(list);
+    cachePutKey_(KEY, raw, 60); // แก้รายชื่อในชีตแล้วมีผลภายใน 1 นาที
+  }
+  const map = {};
+  JSON.parse(raw).forEach(r => { map[r[0]] = { name: r[1], class: r[2] }; });
+  return map;
+}
+
+function checkAllowed_(id) {
+  if (!REQUIRE_ALLOWED_LIST) return { status: 'success', allowed: true };
+  const a = getAllowed_()[id];
+  return a
+    ? { status: 'success', allowed: true, name: a.name, class: a.class }
+    : { status: 'success', allowed: false };
+}
+
+/* ---------- Cache (เก็บคำตอบชั่วคราว) ---------- */
 
 const CACHE_KEY = 'students_json_v1';
-const CACHE_TTL = 30;     // วินาที
+const CACHE_TTL = 30;      // วินาที (รายชื่อนักเรียนที่สมัครแล้ว)
 const CACHE_CHUNK = 25000; // ตัวอักษรต่อชิ้น (ขีดจำกัดของ CacheService คือ 100KB ต่อค่า และภาษาไทยใช้ 3 ไบต์ต่อตัว)
 
-function cacheGet_() {
+function cacheGetKey_(key) {
   const cache = CacheService.getScriptCache();
-  const n = Number(cache.get(CACHE_KEY + ':n') || 0);
+  const n = Number(cache.get(key + ':n') || 0);
   if (!n) return null;
   const keys = [];
-  for (let i = 0; i < n; i++) keys.push(CACHE_KEY + ':' + i);
+  for (let i = 0; i < n; i++) keys.push(key + ':' + i);
   const parts = cache.getAll(keys);
   let out = '';
   for (let i = 0; i < n; i++) {
-    const part = parts[CACHE_KEY + ':' + i];
+    const part = parts[key + ':' + i];
     if (part == null) return null;
     out += part;
   }
   return out;
 }
 
-function cachePut_(str) {
+function cachePutKey_(key, str, ttl) {
   const cache = CacheService.getScriptCache();
   const n = Math.ceil(str.length / CACHE_CHUNK);
   const obj = {};
-  obj[CACHE_KEY + ':n'] = String(n);
-  for (let i = 0; i < n; i++) obj[CACHE_KEY + ':' + i] = str.substr(i * CACHE_CHUNK, CACHE_CHUNK);
-  cache.putAll(obj, CACHE_TTL);
+  obj[key + ':n'] = String(n);
+  for (let i = 0; i < n; i++) obj[key + ':' + i] = str.substr(i * CACHE_CHUNK, CACHE_CHUNK);
+  cache.putAll(obj, ttl);
 }
 
-function cacheClear_() {
+function cacheClearKey_(key) {
   const cache = CacheService.getScriptCache();
-  const n = Number(cache.get(CACHE_KEY + ':n') || 0);
-  const keys = [CACHE_KEY + ':n'];
-  for (let i = 0; i < n; i++) keys.push(CACHE_KEY + ':' + i);
+  const n = Number(cache.get(key + ':n') || 0);
+  const keys = [key + ':n'];
+  for (let i = 0; i < n; i++) keys.push(key + ':' + i);
   cache.removeAll(keys);
 }
+
+function cacheGet_()      { return cacheGetKey_(CACHE_KEY); }
+function cachePut_(str)   { cachePutKey_(CACHE_KEY, str, CACHE_TTL); }
+function cacheClear_()    { cacheClearKey_(CACHE_KEY); }
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
@@ -235,6 +343,7 @@ function json_(obj) {
 
 /** รันครั้งเดียวจากเมนู Run เพื่อสร้างชีตและขออนุญาตเข้าถึง Spreadsheet */
 function setup() {
+  getAllowedSheet_(); // สร้างชีต AllowedStudents ไว้ให้วางรายชื่อ
   const sheet = getSheet_();
   sheet.getRange(1, 1, sheet.getMaxRows(), HEADERS.length).setNumberFormat('@');
 }
