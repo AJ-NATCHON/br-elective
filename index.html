@@ -107,6 +107,7 @@
               <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">รหัสนักเรียน (5 หลัก) <span class="text-red-500">*</span></label>
                 <input type="text" id="reg-id" maxlength="5" pattern="\d{5}" required placeholder="เช่น 45890" oninput="autoFillEmail(this.value)" class="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-red-900 focus:border-maroon outline-none text-sm font-mono">
+                <p id="id-check-msg" class="hidden mt-1 text-xs"></p>
               </div>
               <div>
                 <label class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">ระดับชั้น/ห้อง <span class="text-red-500">*</span></label>
@@ -476,6 +477,7 @@
     let courses = INITIAL_COURSES;
     let students = [];
     let currentUserRole = null; // 'admin' | 'advisor' | null
+    let adminPin = '';          // เก็บในหน่วยความจำเท่านั้น ใช้แนบกับคำสั่งแก้ไข/ลบ
 
     const STORAGE_KEY = 'br_students_v8';
     const hasRemote = () => SCRIPT_URL && SCRIPT_URL !== "วาง_WEB_APP_URL_ตรงนี้";
@@ -575,7 +577,42 @@
     }
 
     // Auto-fill student email
+    let idCheckSeq = 0;
+    function setIdMsg(text, cls) {
+      const el = document.getElementById('id-check-msg');
+      if (!el) return;
+      el.className = 'mt-1 text-xs ' + cls;
+      el.textContent = text;
+    }
+    function hideIdMsg() {
+      const el = document.getElementById('id-check-msg');
+      if (el) el.className = 'hidden mt-1 text-xs';
+    }
+
+    // ตรวจกับรายชื่อผู้มีสิทธิ์สมัครที่เซิร์ฟเวอร์ และเติมชื่อ/ห้องให้อัตโนมัติถ้ามีในรายชื่อ
+    async function checkStudentId(id) {
+      if (!/^\d{5}$/.test(id) || !hasRemote()) { hideIdMsg(); return; }
+      const seq = ++idCheckSeq;
+      setIdMsg('กำลังตรวจสอบรายชื่อ...', 'text-gray-500');
+      try {
+        const res = await fetch(`${SCRIPT_URL}?action=check&id=${encodeURIComponent(id)}`);
+        const d = await res.json();
+        if (seq !== idCheckSeq) return; // มีการพิมพ์รหัสใหม่แล้ว
+        if (d.status !== 'success') { hideIdMsg(); return; }
+        if (!d.allowed) {
+          setIdMsg('✗ รหัสนักเรียนนี้ไม่อยู่ในรายชื่อผู้มีสิทธิ์สมัคร', 'text-red-600 font-semibold');
+          return;
+        }
+        setIdMsg('✓ พบรายชื่อในระบบ', 'text-green-700');
+        if (d.name) document.getElementById('reg-name').value = d.name;
+        if (d.class) document.getElementById('reg-class').value = d.class;
+      } catch (err) {
+        if (seq === idCheckSeq) hideIdMsg();
+      }
+    }
+
     function autoFillEmail(val) {
+      checkStudentId(val);
       const emailInput = document.getElementById('reg-email');
       if (val && val.length === 5 && /^\d+$/.test(val)) {
         emailInput.value = `br${val}@br.ac.th`;
@@ -835,24 +872,31 @@
       document.getElementById('auth-error').classList.add('hidden');
     }
 
-    function handleAuthSubmit(e) {
+    async function handleAuthSubmit(e) {
       e.preventDefault();
       const pin = document.getElementById('auth-pin').value.trim();
       const errorMsg = document.getElementById('auth-error');
+      const fail = (t) => { errorMsg.innerText = t; errorMsg.classList.remove('hidden'); };
 
-      if (pin === 'br113') {
-        currentUserRole = 'admin';
-        setupRoleUI();
-        closeAuthModal();
-        switchTab('admin');
-      } else if (pin === 'br112') {
-        currentUserRole = 'advisor';
-        setupRoleUI();
-        closeAuthModal();
-        switchTab('admin');
-      } else {
-        errorMsg.innerText = 'รหัส PIN ไม่ถูกต้อง!';
-        errorMsg.classList.remove('hidden');
+      if (!hasRemote()) { fail('ยังไม่ได้ตั้งค่า SCRIPT_URL จึงเข้าสู่ระบบไม่ได้'); return; }
+
+      showLoading(true);
+      try {
+        const res = await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ action: 'auth', pin: pin }) });
+        const d = await res.json();
+        showLoading(false);
+        if (d.status === 'success' && (d.role === 'admin' || d.role === 'advisor')) {
+          adminPin = pin;
+          currentUserRole = d.role;
+          setupRoleUI();
+          closeAuthModal();
+          switchTab('admin');
+        } else {
+          fail('รหัส PIN ไม่ถูกต้อง!');
+        }
+      } catch (err) {
+        showLoading(false);
+        fail('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่');
       }
     }
 
@@ -878,6 +922,7 @@
 
     function logoutAdmin() {
       currentUserRole = null;
+      adminPin = '';
       switchTab('register');
     }
 
@@ -966,12 +1011,21 @@
       if (hasRemote()) {
         showLoading(true);
         try {
-          await fetch(SCRIPT_URL, {
+          const res = await fetch(SCRIPT_URL, {
             method: 'POST',
-            body: JSON.stringify({ action: 'delete', id: id })
+            body: JSON.stringify({ action: 'delete', id: id, pin: adminPin })
           });
+          const r = await res.json();
+          if (r.status !== 'success') {
+            showLoading(false);
+            alert(r.message || 'ลบข้อมูลไม่สำเร็จ');
+            return;
+          }
         } catch (err) {
           console.error("Delete error:", err);
+          showLoading(false);
+          alert('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลบข้อมูลไม่สำเร็จ');
+          return;
         }
         showLoading(false);
       }
@@ -1018,18 +1072,28 @@
         class: className,
         email: email,
         courseCode: courseCode,
-        timestamp: timestamp
+        timestamp: timestamp,
+        pin: adminPin
       };
 
       if (hasRemote()) {
         showLoading(true);
         try {
-          await fetch(SCRIPT_URL, {
+          const res = await fetch(SCRIPT_URL, {
             method: 'POST',
             body: JSON.stringify(payload)
           });
+          const r = await res.json();
+          if (r.status !== 'success') {
+            showLoading(false);
+            alert(r.message || 'บันทึกข้อมูลไม่สำเร็จ');
+            return;
+          }
         } catch (err) {
           console.error("Save error:", err);
+          showLoading(false);
+          alert('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ บันทึกข้อมูลไม่สำเร็จ');
+          return;
         }
         showLoading(false);
       }
