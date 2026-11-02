@@ -27,7 +27,14 @@ const VALID_COURSES = [
 
 function doGet(e) {
   try {
-    return json_({ status: 'success', students: readAll_() });
+    // ใช้ข้อมูลจากแคชถ้ามี (ตอบเร็วขึ้นมากเมื่อมีคนเปิดเว็บพร้อมกันหลายคน)
+    const cached = cacheGet_();
+    if (cached) {
+      return ContentService.createTextOutput(cached).setMimeType(ContentService.MimeType.JSON);
+    }
+    const out = JSON.stringify({ status: 'success', students: readAll_() });
+    cachePut_(out);
+    return ContentService.createTextOutput(out).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return json_({ status: 'error', message: String(err) });
   }
@@ -44,12 +51,15 @@ function doPost(e) {
 
   try {
     const body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    let result;
     switch (body.action) {
-      case 'register': return json_(register_(body));
-      case 'update':   return json_(update_(body));
-      case 'delete':   return json_(delete_(body));
-      default:         return json_({ status: 'error', message: 'ไม่รู้จักคำสั่ง: ' + body.action });
+      case 'register': result = register_(body); break;
+      case 'update':   result = update_(body);   break;
+      case 'delete':   result = delete_(body);   break;
+      default:         result = { status: 'error', message: 'ไม่รู้จักคำสั่ง: ' + body.action };
     }
+    if (result.status === 'success') cacheClear_(); // ข้อมูลเปลี่ยนแล้ว ล้างแคชเก่า
+    return json_(result);
   } catch (err) {
     return json_({ status: 'error', message: String(err) });
   } finally {
@@ -177,6 +187,45 @@ function validate_(s) {
 
 function countInCourse_(rows, code) {
   return rows.filter(r => r.courseCode === code).length;
+}
+
+/* ---------- Cache (เก็บคำตอบของ doGet ชั่วคราว) ---------- */
+
+const CACHE_KEY = 'students_json_v1';
+const CACHE_TTL = 30;     // วินาที
+const CACHE_CHUNK = 25000; // ตัวอักษรต่อชิ้น (ขีดจำกัดของ CacheService คือ 100KB ต่อค่า และภาษาไทยใช้ 3 ไบต์ต่อตัว)
+
+function cacheGet_() {
+  const cache = CacheService.getScriptCache();
+  const n = Number(cache.get(CACHE_KEY + ':n') || 0);
+  if (!n) return null;
+  const keys = [];
+  for (let i = 0; i < n; i++) keys.push(CACHE_KEY + ':' + i);
+  const parts = cache.getAll(keys);
+  let out = '';
+  for (let i = 0; i < n; i++) {
+    const part = parts[CACHE_KEY + ':' + i];
+    if (part == null) return null;
+    out += part;
+  }
+  return out;
+}
+
+function cachePut_(str) {
+  const cache = CacheService.getScriptCache();
+  const n = Math.ceil(str.length / CACHE_CHUNK);
+  const obj = {};
+  obj[CACHE_KEY + ':n'] = String(n);
+  for (let i = 0; i < n; i++) obj[CACHE_KEY + ':' + i] = str.substr(i * CACHE_CHUNK, CACHE_CHUNK);
+  cache.putAll(obj, CACHE_TTL);
+}
+
+function cacheClear_() {
+  const cache = CacheService.getScriptCache();
+  const n = Number(cache.get(CACHE_KEY + ':n') || 0);
+  const keys = [CACHE_KEY + ':n'];
+  for (let i = 0; i < n; i++) keys.push(CACHE_KEY + ':' + i);
+  cache.removeAll(keys);
 }
 
 function json_(obj) {

@@ -6,6 +6,7 @@
   <title>ระบบลงทะเบียนเลือกวิชาเรียนเสรี | โรงเรียนเบญจมราชาลัย ในพระบรมราชูปถัมภ์</title>
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Chonburi&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js"></script>
   <style>
     :root {
@@ -164,6 +165,8 @@
             </div>
           </div>
 
+          <p id="sync-status" class="hidden text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-3"></p>
+
           <div class="overflow-x-auto max-h-[520px] overflow-y-auto pr-1">
             <table class="w-full text-left text-sm">
               <thead class="bg-gray-50 sticky top-0 border-b text-gray-600 text-xs uppercase">
@@ -219,26 +222,9 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <!-- Export Center Dropdown -->
-          <div id="export-wrapper" class="relative inline-block text-left">
-            <button onclick="toggleExportMenu()" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow transition">
-              <i data-lucide="download" class="w-4 h-4"></i> ส่งออก CSV <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
-            </button>
-            <div id="export-menu" class="hidden absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-gray-100 z-50 py-1 text-xs">
-              <button onclick="exportCSV('all')" class="w-full text-left px-4 py-2.5 hover:bg-gray-50 font-medium text-gray-700 flex items-center gap-2">
-                <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-600"></i> โหลดข้อมูลทั้งหมด (Master CSV)
-              </button>
-              <button onclick="exportCSV('course_summary')" class="w-full text-left px-4 py-2.5 hover:bg-gray-50 font-medium text-gray-700 flex items-center gap-2 border-t border-gray-100">
-                <i data-lucide="bar-chart-2" class="w-4 h-4 text-blue-600"></i> สรุปจำนวนสมัครแยกตามวิชา
-              </button>
-              <button onclick="exportCSV('by_course')" class="w-full text-left px-4 py-2.5 hover:bg-gray-50 font-medium text-gray-700 flex items-center gap-2">
-                <i data-lucide="users" class="w-4 h-4 text-purple-600"></i> รายชื่อแยกตามชุมนุม/วิชา
-              </button>
-              <button onclick="exportCSV('by_class')" class="w-full text-left px-4 py-2.5 hover:bg-gray-50 font-medium text-gray-700 flex items-center gap-2">
-                <i data-lucide="school" class="w-4 h-4 text-amber-600"></i> รายชื่อแยกตามห้องเรียน
-              </button>
-            </div>
-          </div>
+          <button onclick="openExportModal()" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-semibold flex items-center gap-2 shadow transition">
+            <i data-lucide="download" class="w-4 h-4"></i> ส่งออกข้อมูล
+          </button>
 
           <button id="btn-add-student" onclick="openAddStudentModal()" class="hidden px-4 py-2 bg-maroon hover:bg-maroon-dark text-white rounded-lg text-sm font-semibold items-center gap-2 shadow transition">
             <i data-lucide="user-plus" class="w-4 h-4"></i> เพิ่มนักเรียน
@@ -372,6 +358,85 @@
     </div>
   </div>
 
+  <!-- Export Modal -->
+  <div id="export-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 card-shadow relative">
+      <button onclick="closeExportModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+      <h3 class="text-lg font-bold text-maroon flex items-center gap-2 mb-1">
+        <i data-lucide="file-spreadsheet" class="w-5 h-5"></i> ส่งออกข้อมูล
+      </h3>
+      <p class="text-xs text-gray-500 mb-4">เลือกประเภทรายงานและเงื่อนไขที่ต้องการ</p>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">ประเภทรายงาน</label>
+          <select id="ex-type" onchange="updateExportPreview()" class="w-full p-2 border rounded-lg bg-white outline-none focus:border-maroon">
+            <option value="list">รายชื่อนักเรียน</option>
+            <option value="summary">สรุปจำนวนผู้สมัครแยกตามวิชา</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block font-bold text-gray-700 mb-1">ระดับชั้น</label>
+            <select id="ex-level" onchange="fillExportClassOptions(''); updateExportPreview()" class="w-full p-2 border rounded-lg bg-white outline-none focus:border-maroon">
+              <option value="">ทุกระดับชั้น</option>
+              <option value="ม.4">ม.4</option>
+              <option value="ม.5">ม.5</option>
+              <option value="ม.6">ม.6</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-gray-700 mb-1">ห้องเรียน</label>
+            <select id="ex-class" onchange="updateExportPreview()" class="w-full p-2 border rounded-lg bg-white outline-none focus:border-maroon">
+              <option value="">ทุกห้องเรียน</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">วิชา</label>
+          <select id="ex-course" onchange="updateExportPreview()" class="w-full p-2 border rounded-lg bg-white outline-none focus:border-maroon">
+            <option value="">ทุกวิชา</option>
+          </select>
+        </div>
+
+        <div id="ex-sort-wrap">
+          <label class="block font-bold text-gray-700 mb-1">เรียงลำดับตาม</label>
+          <select id="ex-sort" class="w-full p-2 border rounded-lg bg-white outline-none focus:border-maroon">
+            <option value="course">วิชา</option>
+            <option value="class">ห้องเรียน</option>
+            <option value="id">รหัสนักเรียน</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-bold text-gray-700 mb-1">รูปแบบไฟล์</label>
+          <select id="ex-format" class="w-full p-2 border rounded-lg bg-white outline-none focus:border-maroon">
+            <option value="csv">CSV (ไฟล์เดียว)</option>
+            <option value="xlsx">Excel .xlsx (ไฟล์เดียว)</option>
+            <option value="xlsx-class">Excel แยกชีตตามห้องเรียน</option>
+            <option value="xlsx-course">Excel แยกชีตตามวิชา</option>
+            <option value="xlsx-all">Excel ครบชุด (สรุป + แยกชีตทั้งห้องและวิชา)</option>
+          </select>
+        </div>
+
+        <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-700">
+          จะส่งออก: <span id="ex-count" class="font-bold text-maroon">0</span>
+        </div>
+      </div>
+
+      <div class="pt-4 flex justify-end gap-2">
+        <button type="button" onclick="closeExportModal()" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">ยกเลิก</button>
+        <button type="button" onclick="runExport()" class="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-lg text-sm flex items-center gap-2">
+          <i data-lucide="download" class="w-4 h-4"></i> ดาวน์โหลด
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Footer -->
   <footer class="bg-white border-t border-gray-200 mt-auto py-6 text-center text-xs text-gray-500 no-print">
     <p>© 2569 โรงเรียนเบญจมราชาลัย ในพระบรมราชูปถัมภ์ — กลุ่มบริหารวิชาการ</p>
@@ -454,31 +519,59 @@
       else el.classList.add('hidden');
     }
 
-    // Load Data from Google Sheets or localStorage fallback
-    async function initData() {
-      showLoading(true);
-      let loaded = false;
-      if (hasRemote()) {
-        try {
-          const response = await fetch(SCRIPT_URL);
-          const data = await response.json();
-          if (data.status === "success" && Array.isArray(data.students)) {
-            students = normalizeStudents(data.students);
-            saveLocal();
-            loaded = true;
-          }
-        } catch (error) {
-          console.error("Error fetching Google Sheets data:", error);
-          alert("ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ โปรดตรวจสอบการตั้งค่า URL (แสดงข้อมูลที่บันทึกไว้ในเครื่องแทน)");
-        }
-      }
-      if (!loaded) students = normalizeStudents(loadLocal());
+    // โหลดข้อมูล: แสดงข้อมูลที่เก็บไว้ในเครื่องทันที แล้วอัปเดตจาก Google Sheets เบื้องหลัง
+    let syncing = false;
 
-      showLoading(false);
+    function renderAll() {
       renderCourseOptions();
       renderCourseTable();
       renderAdminTable();
       refreshIcons();
+    }
+
+    function setSyncStatus(text) {
+      const el = document.getElementById('sync-status');
+      if (!el) return;
+      el.textContent = text || '';
+      el.classList.toggle('hidden', !text);
+    }
+
+    async function initData() {
+      if (syncing) return;
+      const local = normalizeStudents(loadLocal());
+      const hadLocal = local.length > 0;
+      students = local;
+      renderAll(); // แสดงผลทันที ไม่ต้องรอเครือข่าย
+
+      if (!hasRemote()) return;
+
+      syncing = true;
+      const submitBtn = document.getElementById('btn-submit-reg');
+      // ถ้ายังไม่มีข้อมูลในเครื่อง (เข้าครั้งแรก) ให้รอข้อมูลจริงก่อนกดลงทะเบียน กันเห็นที่นั่งว่างผิด
+      if (!hadLocal && submitBtn) submitBtn.disabled = true;
+      setSyncStatus('กำลังอัปเดตจำนวนที่นั่งล่าสุด...');
+
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 25000);
+      try {
+        const response = await fetch(SCRIPT_URL, { signal: ctrl.signal });
+        const data = await response.json();
+        if (data.status === "success" && Array.isArray(data.students)) {
+          students = normalizeStudents(data.students);
+          saveLocal();
+          renderAll();
+          setSyncStatus('');
+        } else {
+          throw new Error(data.message || 'unexpected response');
+        }
+      } catch (error) {
+        console.error("Error fetching Google Sheets data:", error);
+        setSyncStatus('เชื่อมต่อ Google Sheets ไม่ได้ กำลังแสดงข้อมูลที่บันทึกไว้ในเครื่อง (กดปุ่มรีเฟรชเพื่อลองใหม่)');
+      } finally {
+        clearTimeout(timer);
+        syncing = false;
+        if (submitBtn) submitBtn.disabled = false;
+      }
     }
 
     // Auto-fill student email
@@ -959,11 +1052,7 @@
       renderAdminTable();
     }
 
-    // CSV Export Center Logic
-    function toggleExportMenu() {
-      document.getElementById('export-menu').classList.toggle('hidden');
-    }
-
+    // ===== Export Center =====
     function csvCell(v) {
       let t = String(v ?? '');
       if (/^[=+\-@]/.test(t)) t = "'" + t; // กัน CSV/Formula injection
@@ -971,40 +1060,206 @@
     }
     function csvRow(arr) { return arr.map(csvCell).join(',') + '\r\n'; }
 
-    function exportCSV(type) {
-      document.getElementById('export-menu').classList.add('hidden');
-      let csv = '\uFEFF'; // UTF-8 BOM ให้ Excel อ่านภาษาไทยได้
+    function levelOf(cls) {
+      const m = String(cls).match(/^ม\.(\d)/);
+      return m ? 'ม.' + m[1] : '';
+    }
 
-      if (type === 'all') {
-        csv += csvRow(['ลำดับ','รหัสนักเรียน','ชื่อ-นามสกุล','ระดับชั้น','อีเมล','รหัสวิชา','ชื่อวิชา','ครูผู้สอน','ห้องเรียน','เวลาลงทะเบียน']);
-        students.forEach((s, i) => {
-          const c = courses.find(item => item.code === s.courseCode);
-          csv += csvRow([i + 1, s.id, s.name, s.class, s.email, c ? c.code : s.courseCode, c ? c.name : '', c ? c.teacher : '', c ? c.room : '', s.timestamp]);
-        });
-        downloadBlob(csv, 'รายงานการลงทะเบียนวิชาเสรี_ทั้งหมด_2569.csv');
-      } else if (type === 'course_summary') {
-        csv += csvRow(['รหัสวิชา','ชื่อวิชาเลือกเสรี','ครูผู้สอน','ห้องเรียน','โควตารวม','สมัครแล้ว (คน)','คงเหลือ (คน)','สถานะ']);
-        courses.forEach(c => {
-          const count = students.filter(s => s.courseCode === c.code).length;
-          csv += csvRow([c.code, c.name, c.teacher, c.room, c.maxQuota, count, c.maxQuota - count, count >= c.maxQuota ? 'เต็ม' : 'เปิดรับ']);
-        });
-        downloadBlob(csv, 'สรุปโควตาจำแนกตามรายวิชา_2569.csv');
-      } else if (type === 'by_course') {
-        csv += csvRow(['รหัสวิชา','ชื่อวิชา','รหัสนักเรียน','ชื่อ-นามสกุล','ห้องเรียน','อีเมล']);
-        courses.forEach(c => {
-          students.filter(s => s.courseCode === c.code).forEach(s => {
-            csv += csvRow([c.code, c.name, s.id, s.name, s.class, s.email]);
-          });
-        });
-        downloadBlob(csv, 'รายชื่อนักเรียนแยกตามชุมนุมวิชา_2569.csv');
-      } else if (type === 'by_class') {
-        csv += csvRow(['ห้องเรียน','รหัสนักเรียน','ชื่อ-นามสกุล','วิชาที่เลือก','รหัสวิชา','อีเมล']);
-        [...students].sort((a, b) => a.class.localeCompare(b.class, 'th') || a.id.localeCompare(b.id)).forEach(s => {
-          const c = courses.find(item => item.code === s.courseCode);
-          csv += csvRow([s.class, s.id, s.name, c ? c.name : '', c ? c.code : s.courseCode, s.email]);
-        });
-        downloadBlob(csv, 'รายชื่อนักเรียนแยกตามห้องเรียน_2569.csv');
+    function classesForLevel(level) {
+      const all = Array.from(document.querySelectorAll('#m-class option')).map(o => o.value).filter(Boolean);
+      return level ? all.filter(c => c.startsWith(level + '/')) : all;
+    }
+
+    function fillExportClassOptions(selected) {
+      const level = document.getElementById('ex-level').value;
+      const list = classesForLevel(level);
+      const sel = document.getElementById('ex-class');
+      sel.innerHTML = '<option value="">ทุกห้องเรียน</option>' +
+        list.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+      sel.value = list.includes(selected) ? selected : '';
+    }
+
+    function openExportModal() {
+      const courseSel = document.getElementById('ex-course');
+      courseSel.innerHTML = '<option value="">ทุกวิชา</option>' +
+        courses.map(c => `<option value="${escapeHtml(c.code)}">${escapeHtml(c.code)} — ${escapeHtml(c.name)}</option>`).join('');
+      // ตั้งค่าเริ่มต้นตามตัวกรองที่เลือกไว้ในตารางด้านล่าง
+      courseSel.value = document.getElementById('filter-course').value;
+      document.getElementById('ex-level').value = document.getElementById('filter-class').value;
+      fillExportClassOptions('');
+      updateExportPreview();
+      document.getElementById('export-modal').classList.remove('hidden');
+      refreshIcons();
+    }
+
+    function closeExportModal() {
+      document.getElementById('export-modal').classList.add('hidden');
+    }
+
+    function getExportRows() {
+      const level = document.getElementById('ex-level').value;
+      const cls = document.getElementById('ex-class').value;
+      const code = document.getElementById('ex-course').value;
+      const sortBy = document.getElementById('ex-sort').value;
+      const cmp = (a, b) => String(a).localeCompare(String(b), 'th', { numeric: true });
+
+      const list = students.filter(s =>
+        (!level || levelOf(s.class) === level) &&
+        (!cls || s.class === cls) &&
+        (!code || s.courseCode === code));
+
+      list.sort((a, b) => {
+        if (sortBy === 'class') return cmp(a.class, b.class) || cmp(a.id, b.id);
+        if (sortBy === 'id') return cmp(a.id, b.id);
+        return cmp(a.courseCode, b.courseCode) || cmp(a.class, b.class) || cmp(a.id, b.id);
+      });
+      return list;
+    }
+
+    function updateExportPreview() {
+      const type = document.getElementById('ex-type').value;
+      const code = document.getElementById('ex-course').value;
+      const rows = getExportRows();
+      document.getElementById('ex-sort-wrap').classList.toggle('hidden', type === 'summary');
+      const fmt = document.getElementById('ex-format');
+      Array.from(fmt.options).forEach(o => { if (o.value.startsWith('xlsx-')) o.disabled = (type === 'summary'); });
+      if (type === 'summary' && fmt.value.startsWith('xlsx-')) fmt.value = 'xlsx';
+      document.getElementById('ex-count').innerText = type === 'summary'
+        ? `${code ? 1 : courses.length} วิชา (นับนักเรียน ${rows.length} คน ตามเงื่อนไข)`
+        : `${rows.length} คน`;
+    }
+
+    const LIST_HEADER = ['ลำดับ','รหัสนักเรียน','ชื่อ-นามสกุล','ระดับชั้น/ห้อง','อีเมล','รหัสวิชา','ชื่อวิชา','ครูผู้สอน','ห้องเรียนวิชา','เวลาลงทะเบียน'];
+
+    function listRows(rows) {
+      return rows.map((s, i) => {
+        const c = courses.find(item => item.code === s.courseCode);
+        return [i + 1, s.id, s.name, s.class, s.email, c ? c.code : s.courseCode, c ? c.name : '', c ? c.teacher : '', c ? c.room : '', s.timestamp];
+      });
+    }
+
+    function summaryTable(rows, code) {
+      const head = ['รหัสวิชา','ชื่อวิชา','ครูผู้สอน','ห้องเรียนวิชา','โควตารวม','จำนวนตามเงื่อนไข (คน)','สมัครทั้งหมด (คน)','คงเหลือ (คน)','สถานะ'];
+      const body = courses.filter(c => !code || c.code === code).map(c => {
+        const inFilter = rows.filter(s => s.courseCode === c.code).length;
+        const total = students.filter(s => s.courseCode === c.code).length;
+        return [c.code, c.name, c.teacher, c.room, c.maxQuota, inFilter, total, c.maxQuota - total, total >= c.maxQuota ? 'เต็ม' : 'เปิดรับ'];
+      });
+      return [head, ...body];
+    }
+
+    // ชื่อชีต Excel: ไม่เกิน 31 ตัวอักษร ห้ามมี \ / ? * [ ] : และห้ามซ้ำ
+    function safeSheetName(name, used) {
+      let base = String(name).replace(/[\\\/?*\[\]:]/g, '-').trim().slice(0, 31) || 'Sheet';
+      let n = base, i = 2;
+      while (used.has(n.toLowerCase())) { const suf = '_' + i++; n = base.slice(0, 31 - suf.length) + suf; }
+      used.add(n.toLowerCase());
+      return n;
+    }
+
+    // ชีตของห้องเรียน: หัวเรื่อง + รายชื่อนักเรียนพร้อมวิชาที่เลือก
+    function roomSheetAOA(cls, group) {
+      const title = [
+        [`ห้อง ${cls} — รายชื่อนักเรียนที่ลงทะเบียนวิชาเลือกเสรี`],
+        [`จำนวน ${group.length} คน`],
+        []
+      ];
+      const head = ['ลำดับ','รหัสนักเรียน','ชื่อ-นามสกุล','รหัสวิชา','ชื่อวิชา','ครูผู้สอน','ห้องเรียนวิชา'];
+      const body = group.map((s, i) => {
+        const c = courses.find(item => item.code === s.courseCode);
+        return [i + 1, s.id, s.name, c ? c.code : s.courseCode, c ? c.name : '', c ? c.teacher : '', c ? c.room : ''];
+      });
+      return { aoa: [...title, head, ...body], skip: title.length };
+    }
+
+    // ชีตของวิชา: หัวเรื่อง + รายชื่อนักเรียนที่สมัครวิชานั้น
+    function courseSheetAOA(c, group) {
+      const title = [
+        [`${c.code} ${c.name}`],
+        [`ครูผู้สอน: ${c.teacher}   ห้องเรียน: ${c.room}`],
+        [`จำนวน ${group.length} คน (โควตา ${c.maxQuota})`],
+        []
+      ];
+      const head = ['ลำดับ','รหัสนักเรียน','ชื่อ-นามสกุล','ระดับชั้น/ห้อง','อีเมล','เวลาลงทะเบียน'];
+      const body = group.map((s, i) => [i + 1, s.id, s.name, s.class, s.email, s.timestamp]);
+      return { aoa: [...title, head, ...body], skip: title.length };
+    }
+
+    function summarySheetAOA(rows) {
+      const head = ['รหัสวิชา','ชื่อวิชา','ครูผู้สอน','ห้องเรียนวิชา','โควตารวม','สมัครแล้ว (คน)','คงเหลือ (คน)','สถานะ'];
+      const body = courses.map(c => {
+        const n = rows.filter(s => s.courseCode === c.code).length;
+        return [c.code, c.name, c.teacher, c.room, c.maxQuota, n, c.maxQuota - n, n >= c.maxQuota ? 'เต็ม' : 'เปิดรับ'];
+      });
+      return { aoa: [head, ...body], skip: 0 };
+    }
+
+    function makeSheet(aoa, skip) {
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const table = aoa.slice(skip || 0);
+      const cols = Math.max(...table.map(r => r.length));
+      ws['!cols'] = Array.from({ length: cols }, (_, ci) => ({
+        wch: Math.min(40, Math.max(8, ...table.map(r => String(r[ci] ?? '').length + 2)))
+      }));
+      return ws;
+    }
+
+    function runExport() {
+      const type = document.getElementById('ex-type').value;
+      const format = document.getElementById('ex-format').value;
+      const level = document.getElementById('ex-level').value;
+      const cls = document.getElementById('ex-class').value;
+      const code = document.getElementById('ex-course').value;
+      const rows = getExportRows();
+
+      if (type === 'list' && rows.length === 0) { alert('ไม่พบข้อมูลตามเงื่อนไขที่เลือก'); return; }
+
+      const title = type === 'list' ? 'รายชื่อนักเรียน' : 'สรุปจำนวนผู้สมัคร';
+      const splitLabel = { 'xlsx-class': 'แยกตามห้อง', 'xlsx-course': 'แยกตามวิชา', 'xlsx-all': 'แยกตามห้องและวิชา' }[format] || '';
+      const parts = [title, splitLabel, level, cls, code].filter(Boolean);
+      const base = parts.join('_').replace(/[\\/:*?"<>|]/g, '-') + '_2569';
+      const aoa = type === 'list' ? [LIST_HEADER, ...listRows(rows)] : summaryTable(rows, code);
+
+      if (format === 'csv') {
+        downloadBlob('\uFEFF' + aoa.map(csvRow).join(''), base + '.csv');
+        closeExportModal();
+        return;
       }
+
+      if (!window.XLSX) {
+        alert('โหลดไลบรารี Excel ไม่สำเร็จ (ตรวจสอบอินเทอร์เน็ต) กรุณาเลือกรูปแบบ CSV แทน');
+        return;
+      }
+
+      const wb = XLSX.utils.book_new();
+      const used = new Set();
+      const add = (sheet, name) => XLSX.utils.book_append_sheet(wb, makeSheet(sheet.aoa, sheet.skip), safeSheetName(name, used));
+      const cmp = (a, b) => String(a).localeCompare(String(b), 'th', { numeric: true });
+      const wantClass = format === 'xlsx-class' || format === 'xlsx-all';
+      const wantCourse = format === 'xlsx-course' || format === 'xlsx-all';
+
+      if (format === 'xlsx-all') add(summarySheetAOA(rows), 'สรุป');
+
+      if (wantClass) {
+        const groups = {};
+        rows.forEach(s => { (groups[s.class] = groups[s.class] || []).push(s); });
+        Object.keys(groups).sort(cmp).forEach(k => {
+          const g = groups[k].sort((a, b) => cmp(a.id, b.id));
+          add(roomSheetAOA(k, g), (format === 'xlsx-all' ? 'ห้อง ' : '') + k);
+        });
+      }
+
+      if (wantCourse) {
+        courses.forEach(c => {
+          const g = rows.filter(s => s.courseCode === c.code).sort((a, b) => cmp(a.class, b.class) || cmp(a.id, b.id));
+          if (g.length) add(courseSheetAOA(c, g), (format === 'xlsx-all' ? 'วิชา ' : '') + c.code + ' ' + c.name);
+        });
+      }
+
+      if (format === 'xlsx') add({ aoa: aoa, skip: 0 }, title);
+
+      XLSX.writeFile(wb, base + '.xlsx');
+      closeExportModal();
     }
 
     function downloadBlob(content, filename) {
@@ -1018,13 +1273,6 @@
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
-
-    document.addEventListener('click', function(e) {
-      if (!e.target.closest('#export-wrapper')) {
-        const menu = document.getElementById('export-menu');
-        if (menu) menu.classList.add('hidden');
-      }
-    });
 
     document.getElementById('search-input').addEventListener('keydown', function(e) {
       if (e.key === 'Enter') searchRegistration();
