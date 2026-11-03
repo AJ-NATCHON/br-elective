@@ -238,7 +238,17 @@
       </div>
 
       <!-- Filters & Search -->
-      <div class="bg-white p-4 rounded-xl border border-gray-100 card-shadow grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="bg-white p-4 rounded-xl border border-gray-100 card-shadow grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">เรียงลำดับ</label>
+          <select id="admin-sort" onchange="renderAdminTable()" class="w-full p-2 border border-gray-200 rounded-lg text-xs bg-white outline-none">
+            <option value="time-desc">เวลาลงทะเบียน (ล่าสุดขึ้นก่อน)</option>
+            <option value="time-asc">เวลาลงทะเบียน (เก่าสุดขึ้นก่อน)</option>
+            <option value="id">รหัสนักเรียน</option>
+            <option value="class">ห้องเรียน</option>
+            <option value="course">วิชา</option>
+          </select>
+        </div>
         <div>
           <label class="block text-xs font-semibold text-gray-500 mb-1">กรองตามวิชา</label>
           <select id="filter-course" onchange="renderAdminTable()" class="w-full p-2 border border-gray-200 rounded-lg text-xs bg-white outline-none">
@@ -407,6 +417,8 @@
         <div id="ex-sort-wrap">
           <label class="block font-bold text-gray-700 mb-1">เรียงลำดับตาม</label>
           <select id="ex-sort" class="w-full p-2 border rounded-lg bg-white outline-none focus:border-maroon">
+            <option value="time-desc">เวลาลงทะเบียน (ล่าสุดขึ้นก่อน)</option>
+            <option value="time-asc">เวลาลงทะเบียน (เก่าสุดขึ้นก่อน)</option>
             <option value="course">วิชา</option>
             <option value="class">ห้องเรียน</option>
             <option value="id">รหัสนักเรียน</option>
@@ -492,6 +504,27 @@
       if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
     }
 
+    // แปลงสตริงเวลาเป็นตัวเลข timestamp เพื่อนำไปเปรียบเทียบเรียงลำดับได้อย่างแม่นยำ
+    function parseTimestamp(ts) {
+      if (!ts) return 0;
+      let d = Date.parse(ts);
+      if (!isNaN(d)) return d;
+
+      // รองรับข้อความวันที่แบบไทย เช่น "3/11/2569 01:05:00" หรือ "03/11/2569, 13:45:10"
+      const m = String(ts).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})[,\s]+(\d{1,2}):(\d{1,2}):?(\d{1,2})?/);
+      if (m) {
+        let day = parseInt(m[1], 10);
+        let month = parseInt(m[2], 10) - 1;
+        let year = parseInt(m[3], 10);
+        if (year > 2500) year -= 543; // แปลง พ.ศ. เป็น ค.ศ.
+        let hour = parseInt(m[4], 10);
+        let min = parseInt(m[5], 10);
+        let sec = parseInt(m[6] || '0', 10);
+        return new Date(year, month, day, hour, min, sec).getTime();
+      }
+      return 0;
+    }
+
     function loadLocal() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -549,7 +582,6 @@
 
       syncing = true;
       const submitBtn = document.getElementById('btn-submit-reg');
-      // ถ้ายังไม่มีข้อมูลในเครื่อง (เข้าครั้งแรก) ให้รอข้อมูลจริงก่อนกดลงทะเบียน กันเห็นที่นั่งว่างผิด
       if (!hadLocal && submitBtn) submitBtn.disabled = true;
       setSyncStatus('กำลังอัปเดตจำนวนที่นั่งล่าสุด...');
 
@@ -589,7 +621,6 @@
       if (el) el.className = 'hidden mt-1 text-xs';
     }
 
-    // ตรวจกับรายชื่อผู้มีสิทธิ์สมัครที่เซิร์ฟเวอร์ และเติมชื่อ/ห้องให้อัตโนมัติถ้ามีในรายชื่อ
     async function checkStudentId(id) {
       if (!/^\d{5}$/.test(id) || !hasRemote()) { hideIdMsg(); return; }
       const seq = ++idCheckSeq;
@@ -597,7 +628,7 @@
       try {
         const res = await fetch(`${SCRIPT_URL}?action=check&id=${encodeURIComponent(id)}`);
         const d = await res.json();
-        if (seq !== idCheckSeq) return; // มีการพิมพ์รหัสใหม่แล้ว
+        if (seq !== idCheckSeq) return;
         if (d.status !== 'success') { hideIdMsg(); return; }
         if (!d.allowed) {
           setIdMsg('✗ รหัสนักเรียนนี้ไม่อยู่ในรายชื่อผู้มีสิทธิ์สมัคร', 'text-red-600 font-semibold');
@@ -678,7 +709,6 @@
       }).join('');
     }
 
-    // ส่งข้อมูลลงทะเบียนไป Apps Script พร้อมลองใหม่อัตโนมัติเมื่อระบบหนาแน่น
     const sleep = ms => new Promise(r => setTimeout(r, ms));
 
     async function submitRegistration(student) {
@@ -693,7 +723,6 @@
           if (data.status === 'success') return { ok: true };
           if (data.code !== 'BUSY') return { ok: false, message: data.message };
         } catch (err) {
-          // อาจบันทึกสำเร็จแล้วแต่ตอบกลับไม่ทัน: ตรวจจากข้อมูลจริงก่อนส่งซ้ำ
           try {
             const chk = await (await fetch(SCRIPT_URL)).json();
             if (chk.status === 'success' && chk.students.some(s =>
@@ -716,7 +745,6 @@
       const courseCode = document.getElementById('reg-course').value;
       const email = `br${id}@br.ac.th`;
 
-      // Pre-validation
       if (students.some(s => s.id === id)) {
         alert(`รหัสนักเรียน ${id} นี้เคยลงทะเบียนเรียนเรียบร้อยแล้ว!`);
         return;
@@ -739,14 +767,13 @@
         timestamp: new Date().toLocaleString('th-TH')
       };
 
-      // Send to Google Sheets if configured
       if (hasRemote()) {
         showLoading(true);
         const result = await submitRegistration(newStudent);
         showLoading(false);
         if (!result.ok) {
           alert(result.message || "เกิดข้อผิดพลาดในการบันทึกข้อมูล");
-          initData(); // โหลดข้อมูลล่าสุด เผื่อโควตาเต็ม/รหัสซ้ำ
+          initData();
           return;
         }
       }
@@ -761,7 +788,6 @@
       renderCourseOptions();
       renderCourseTable();
 
-      // Switch to Check Tab and Show Receipt
       switchTab('check');
       document.getElementById('search-input').value = id;
       searchRegistration();
@@ -926,14 +952,27 @@
       switchTab('register');
     }
 
-    // Render Admin Table
+    // Render Admin Table (พร้อมระบบเรียงลำดับเวลาล่าสุดขึ้นก่อน)
     function renderAdminTable() {
       const tbody = document.getElementById('admin-table-body');
+      const sortVal = document.getElementById('admin-sort') ? document.getElementById('admin-sort').value : 'time-desc';
       const cFilter = document.getElementById('filter-course').value;
       const classFilter = document.getElementById('filter-class').value;
       const search = document.getElementById('admin-search').value.toLowerCase().trim();
 
       let list = [...students];
+
+      const cmp = (a, b) => String(a).localeCompare(String(b), 'th', { numeric: true });
+
+      // การจัดเรียงลำดับ
+      list.sort((a, b) => {
+        if (sortVal === 'time-desc') return parseTimestamp(b.timestamp) - parseTimestamp(a.timestamp);
+        if (sortVal === 'time-asc') return parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp);
+        if (sortVal === 'id') return cmp(a.id, b.id);
+        if (sortVal === 'class') return cmp(a.class, b.class) || cmp(a.id, b.id);
+        if (sortVal === 'course') return cmp(a.courseCode, b.courseCode) || cmp(a.class, b.class) || cmp(a.id, b.id);
+        return parseTimestamp(b.timestamp) - parseTimestamp(a.timestamp);
+      });
 
       if (cFilter) list = list.filter(s => s.courseCode === cFilter);
       if (classFilter) list = list.filter(s => s.class.includes(classFilter));
@@ -1119,7 +1158,7 @@
     // ===== Export Center =====
     function csvCell(v) {
       let t = String(v ?? '');
-      if (/^[=+\-@]/.test(t)) t = "'" + t; // กัน CSV/Formula injection
+      if (/^[=+\-@]/.test(t)) t = "'" + t;
       return '"' + t.replace(/"/g, '""') + '"';
     }
     function csvRow(arr) { return arr.map(csvCell).join(',') + '\r\n'; }
@@ -1147,7 +1186,6 @@
       const courseSel = document.getElementById('ex-course');
       courseSel.innerHTML = '<option value="">ทุกวิชา</option>' +
         courses.map(c => `<option value="${escapeHtml(c.code)}">${escapeHtml(c.code)} — ${escapeHtml(c.name)}</option>`).join('');
-      // ตั้งค่าเริ่มต้นตามตัวกรองที่เลือกไว้ในตารางด้านล่าง
       courseSel.value = document.getElementById('filter-course').value;
       document.getElementById('ex-level').value = document.getElementById('filter-class').value;
       fillExportClassOptions('');
@@ -1173,6 +1211,8 @@
         (!code || s.courseCode === code));
 
       list.sort((a, b) => {
+        if (sortBy === 'time-desc') return parseTimestamp(b.timestamp) - parseTimestamp(a.timestamp);
+        if (sortBy === 'time-asc') return parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp);
         if (sortBy === 'class') return cmp(a.class, b.class) || cmp(a.id, b.id);
         if (sortBy === 'id') return cmp(a.id, b.id);
         return cmp(a.courseCode, b.courseCode) || cmp(a.class, b.class) || cmp(a.id, b.id);
@@ -1212,7 +1252,6 @@
       return [head, ...body];
     }
 
-    // ชื่อชีต Excel: ไม่เกิน 31 ตัวอักษร ห้ามมี \ / ? * [ ] : และห้ามซ้ำ
     function safeSheetName(name, used) {
       let base = String(name).replace(/[\\\/?*\[\]:]/g, '-').trim().slice(0, 31) || 'Sheet';
       let n = base, i = 2;
@@ -1221,7 +1260,6 @@
       return n;
     }
 
-    // ชีตของห้องเรียน: หัวเรื่อง + รายชื่อนักเรียนพร้อมวิชาที่เลือก
     function roomSheetAOA(cls, group) {
       const title = [
         [`ห้อง ${cls} — รายชื่อนักเรียนที่ลงทะเบียนวิชาเลือกเสรี`],
@@ -1236,7 +1274,6 @@
       return { aoa: [...title, head, ...body], skip: title.length };
     }
 
-    // ชีตของวิชา: หัวเรื่อง + รายชื่อนักเรียนที่สมัครวิชานั้น
     function courseSheetAOA(c, group) {
       const title = [
         [`${c.code} ${c.name}`],
