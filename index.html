@@ -90,11 +90,20 @@
         
         <!-- Registration Form (5 cols) -->
         <div class="lg:col-span-5 bg-white p-6 sm:p-8 rounded-2xl border border-gray-100 card-shadow">
-          <div class="border-b pb-4 mb-6">
+          <div class="border-b pb-4 mb-4">
             <h2 class="text-xl font-bold text-maroon flex items-center gap-2">
               <i data-lucide="user-plus" class="w-5 h-5"></i> แบบฟอร์มลงทะเบียน
             </h2>
             <p class="text-xs text-gray-500 mt-1">กรุณากรอกข้อมูลส่วนตัวให้ถูกต้องเพื่อลงทะเบียน</p>
+          </div>
+
+          <!-- ป้ายแจ้งกำหนดการเปิด-ปิดระบบ -->
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-900 flex items-center gap-2">
+            <i data-lucide="clock" class="w-4 h-4 text-amber-600 shrink-0"></i>
+            <div>
+              <span class="font-bold block">กำหนดการลงทะเบียน:</span>
+              เปิดสมัคร: 3 พ.ย. 2569 เวลา 08:30 น. — ปิดรับสมัคร: 10 พ.ย. 2569 เวลา 16:30 น.
+            </div>
           </div>
 
           <form id="regForm" onsubmit="handleRegister(event)" class="space-y-4">
@@ -504,19 +513,18 @@
       if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
     }
 
-    // แปลงสตริงเวลาเป็นตัวเลข timestamp เพื่อนำไปเปรียบเทียบเรียงลำดับได้อย่างแม่นยำ
+    // แปลงสตริงเวลาเป็นตัวเลข timestamp เพื่อเปรียบเทียบเรียงลำดับได้อย่างแม่นยำ
     function parseTimestamp(ts) {
       if (!ts) return 0;
       let d = Date.parse(ts);
       if (!isNaN(d)) return d;
 
-      // รองรับข้อความวันที่แบบไทย เช่น "3/11/2569 01:05:00" หรือ "03/11/2569, 13:45:10"
       const m = String(ts).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})[,\s]+(\d{1,2}):(\d{1,2}):?(\d{1,2})?/);
       if (m) {
         let day = parseInt(m[1], 10);
         let month = parseInt(m[2], 10) - 1;
         let year = parseInt(m[3], 10);
-        if (year > 2500) year -= 543; // แปลง พ.ศ. เป็น ค.ศ.
+        if (year > 2500) year -= 543;
         let hour = parseInt(m[4], 10);
         let min = parseInt(m[5], 10);
         let sec = parseInt(m[6] || '0', 10);
@@ -554,7 +562,6 @@
       else el.classList.add('hidden');
     }
 
-    // โหลดข้อมูล: แสดงข้อมูลที่เก็บไว้ในเครื่องทันที แล้วอัปเดตจาก Google Sheets เบื้องหลัง
     let syncing = false;
 
     function renderAll() {
@@ -576,7 +583,7 @@
       const local = normalizeStudents(loadLocal());
       const hadLocal = local.length > 0;
       students = local;
-      renderAll(); // แสดงผลทันที ไม่ต้องรอเครือข่าย
+      renderAll();
 
       if (!hasRemote()) return;
 
@@ -952,7 +959,7 @@
       switchTab('register');
     }
 
-    // Render Admin Table (พร้อมระบบเรียงลำดับเวลาล่าสุดขึ้นก่อน)
+    // Render Admin Table
     function renderAdminTable() {
       const tbody = document.getElementById('admin-table-body');
       const sortVal = document.getElementById('admin-sort') ? document.getElementById('admin-sort').value : 'time-desc';
@@ -964,7 +971,7 @@
 
       const cmp = (a, b) => String(a).localeCompare(String(b), 'th', { numeric: true });
 
-      // การจัดเรียงลำดับ
+      // จัดเรียงลำดับ
       list.sort((a, b) => {
         if (sortVal === 'time-desc') return parseTimestamp(b.timestamp) - parseTimestamp(a.timestamp);
         if (sortVal === 'time-asc') return parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp);
