@@ -97,12 +97,12 @@
             <p class="text-xs text-gray-500 mt-1">กรุณากรอกข้อมูลส่วนตัวให้ถูกต้องเพื่อลงทะเบียน</p>
           </div>
 
-          <!-- ป้ายแจ้งกำหนดการเปิด-ปิดระบบ -->
-          <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-900 flex items-center gap-2">
+          <!-- ป้ายแจ้งกำหนดการเปิด-ปิดระบบ (ดึงข้อมูลอัตโนมัติ) -->
+          <div id="time-banner" class="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-900 flex items-center gap-2">
             <i data-lucide="clock" class="w-4 h-4 text-amber-600 shrink-0"></i>
             <div>
               <span class="font-bold block">กำหนดการลงทะเบียน:</span>
-              เปิดสมัคร: 3 พ.ย. 2569 เวลา 08:30 น. — ปิดรับสมัคร: 10 พ.ย. 2569 เวลา 16:30 น.
+              <span id="time-banner-text">กำลังโหลดกำหนดการ...</span>
             </div>
           </div>
 
@@ -243,6 +243,32 @@
           <button onclick="logoutAdmin()" class="px-3 py-2 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition flex items-center gap-1">
             <i data-lucide="log-out" class="w-4 h-4"></i> ออกจากระบบ
           </button>
+        </div>
+      </div>
+
+      <!-- กล่องตั้งค่าช่วงเวลาเปิด-ปิดรับสมัคร (แสดงเฉพาะ Admin) -->
+      <div id="admin-time-panel" class="hidden bg-white p-5 rounded-2xl border border-amber-200 card-shadow">
+        <h3 class="text-sm font-bold text-maroon flex items-center gap-2 mb-3">
+          <i data-lucide="settings" class="w-4 h-4"></i> ตั้งค่าช่วงเวลาเปิด-ปิดรับลงทะเบียน ( Admin Only )
+        </h3>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+          <div>
+            <label class="block font-semibold text-gray-700 mb-1">เวลาเปิดรับสมัคร</label>
+            <input type="text" id="setting-start" placeholder="YYYY-MM-DD HH:mm:ss" class="w-full p-2 border rounded-lg font-mono outline-none focus:border-maroon">
+          </div>
+          <div>
+            <label class="block font-semibold text-gray-700 mb-1">เวลาปิดรับสมัคร</label>
+            <input type="text" id="setting-end" placeholder="YYYY-MM-DD HH:mm:ss" class="w-full p-2 border rounded-lg font-mono outline-none focus:border-maroon">
+          </div>
+          <div class="flex items-end gap-2">
+            <label class="flex items-center gap-2 cursor-pointer pb-2">
+              <input type="checkbox" id="setting-enable" class="w-4 h-4 accent-maroon">
+              <span class="font-bold text-gray-700">เปิดใช้งานระบบตั้งเวลา</span>
+            </label>
+            <button onclick="saveSystemSettings()" class="px-4 py-2 bg-maroon hover:bg-maroon-dark text-white font-bold rounded-lg transition shadow text-xs flex items-center gap-1 ml-auto">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i> บันทึกเวลา
+            </button>
+          </div>
         </div>
       </div>
 
@@ -466,10 +492,8 @@
 
   <!-- Script Application Logic -->
   <script>
-    // *** วาง URL ของ Google Apps Script Web App ที่นี่ ***
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxH3-TUwZIrEsJhOLkPR1JJHWtXdyPjjaLa9dCRuSoR3XaeBecF1YS0idv49t6yiaIEDQ/exec";
 
-    // Initial Master Course Data
     const INITIAL_COURSES = [
       { code: "ค30294", name: "คณิตศาสตร์เพื่อการศึกษาต่อ", teacher: "ครูรุ่งโรจน์ ติดมา", room: "343", maxQuota: 35 },
       { code: "ค30295", name: "คณิตศาสตร์เพื่อวิศวกรรมเบื้องต้น", teacher: "ครูศาศวัต คงกะเรียน", room: "342", maxQuota: 35 },
@@ -494,11 +518,11 @@
       { code: "พ30202", name: "คีตะมวยไทย", teacher: "ครูผดุงศักดิ์ บูรณะสมบัติ", room: "115", maxQuota: 35 }
     ];
 
-    // State
     let courses = INITIAL_COURSES;
     let students = [];
-    let currentUserRole = null; // 'admin' | 'advisor' | null
-    let adminPin = '';          // เก็บในหน่วยความจำเท่านั้น ใช้แนบกับคำสั่งแก้ไข/ลบ
+    let systemSettings = { enabled: true, startTime: '', endTime: '' };
+    let currentUserRole = null;
+    let adminPin = '';
 
     const STORAGE_KEY = 'br_students_v8';
     const hasRemote = () => SCRIPT_URL && SCRIPT_URL !== "วาง_WEB_APP_URL_ตรงนี้";
@@ -513,7 +537,6 @@
       if (window.lucide && typeof lucide.createIcons === 'function') lucide.createIcons();
     }
 
-    // แปลงสตริงเวลาเป็นตัวเลข timestamp เพื่อเปรียบเทียบเรียงลำดับได้อย่างแม่นยำ
     function parseTimestamp(ts) {
       if (!ts) return 0;
       let d = Date.parse(ts);
@@ -562,12 +585,22 @@
       else el.classList.add('hidden');
     }
 
+    function updateTimeBanner() {
+      const el = document.getElementById('time-banner-text');
+      if (!systemSettings.enabled) {
+        el.innerText = 'เปิดให้ลงทะเบียนได้ตลอดเวลา (ไม่จำกัดช่วงเวลา)';
+      } else {
+        el.innerText = `เปิดสมัคร: ${systemSettings.startTime || '-'} น. — ปิดรับสมัคร: ${systemSettings.endTime || '-'} น.`;
+      }
+    }
+
     let syncing = false;
 
     function renderAll() {
       renderCourseOptions();
       renderCourseTable();
       renderAdminTable();
+      updateTimeBanner();
       refreshIcons();
     }
 
@@ -590,7 +623,7 @@
       syncing = true;
       const submitBtn = document.getElementById('btn-submit-reg');
       if (!hadLocal && submitBtn) submitBtn.disabled = true;
-      setSyncStatus('กำลังอัปเดตจำนวนที่นั่งล่าสุด...');
+      setSyncStatus('กำลังอัปเดตจำนวนที่นั่งและกำหนดการล่าสุด...');
 
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 25000);
@@ -599,6 +632,12 @@
         const data = await response.json();
         if (data.status === "success" && Array.isArray(data.students)) {
           students = normalizeStudents(data.students);
+          if (data.settings) {
+            systemSettings = data.settings;
+            document.getElementById('setting-start').value = systemSettings.startTime;
+            document.getElementById('setting-end').value = systemSettings.endTime;
+            document.getElementById('setting-enable').checked = systemSettings.enabled;
+          }
           saveLocal();
           renderAll();
           setSyncStatus('');
@@ -607,7 +646,7 @@
         }
       } catch (error) {
         console.error("Error fetching Google Sheets data:", error);
-        setSyncStatus('เชื่อมต่อ Google Sheets ไม่ได้ กำลังแสดงข้อมูลที่บันทึกไว้ในเครื่อง (กดปุ่มรีเฟรชเพื่อลองใหม่)');
+        setSyncStatus('เชื่อมต่อ Google Sheets ไม่ได้ กำลังแสดงข้อมูลที่บันทึกไว้ในเครื่อง');
       } finally {
         clearTimeout(timer);
         syncing = false;
@@ -615,7 +654,6 @@
       }
     }
 
-    // Auto-fill student email
     let idCheckSeq = 0;
     function setIdMsg(text, cls) {
       const el = document.getElementById('id-check-msg');
@@ -659,7 +697,6 @@
       }
     }
 
-    // Render Dropdown Options
     function renderCourseOptions() {
       const regSelect = document.getElementById('reg-course');
       const filterSelect = document.getElementById('filter-course');
@@ -682,7 +719,6 @@
       modalSelect.innerHTML = optionsHTML;
     }
 
-    // Render Public Course Table
     function renderCourseTable() {
       const tbody = document.getElementById('course-table-body');
       let totalEnrolledCount = students.length;
@@ -743,7 +779,6 @@
       return { ok: false, message: 'ระบบมีผู้ใช้งานหนาแน่น กรุณารอสักครู่แล้วกดลงทะเบียนอีกครั้ง' };
     }
 
-    // Handle Student Registration
     async function handleRegister(e) {
       e.preventDefault();
       const name = document.getElementById('reg-name').value.trim();
@@ -800,7 +835,6 @@
       searchRegistration();
     }
 
-    // Tab Switching
     function switchTab(tab) {
       document.getElementById('section-register').classList.add('hidden');
       document.getElementById('section-check').classList.add('hidden');
@@ -827,7 +861,6 @@
       }
     }
 
-    // Search Registration
     function searchRegistration() {
       const keyword = document.getElementById('search-input').value.trim();
       const resContainer = document.getElementById('search-result');
@@ -894,7 +927,6 @@
       }
     }
 
-    // Authentication Logic
     function openAuthModal() {
       document.getElementById('auth-modal').classList.remove('hidden');
       document.getElementById('auth-pin').focus();
@@ -937,19 +969,22 @@
       const badge = document.getElementById('role-badge');
       const desc = document.getElementById('role-desc');
       const addBtn = document.getElementById('btn-add-student');
+      const timePanel = document.getElementById('admin-time-panel');
 
       if (currentUserRole === 'admin') {
         badge.innerText = 'ผู้ดูแลระบบ (Admin)';
         badge.className = 'px-2.5 py-0.5 rounded text-xs font-bold uppercase bg-red-100 text-maroon';
-        desc.innerText = 'สิทธิ์ผู้ดูแลระบบ: สามารถ เพิ่ม, แก้ไข, ลบรายชื่อนักเรียน และส่งออก CSV';
+        desc.innerText = 'สิทธิ์ผู้ดูแลระบบ: สามารถ เพิ่ม, แก้ไข, ลบรายชื่อนักเรียน, ตั้งค่าเวลา และส่งออก CSV';
         addBtn.classList.remove('hidden');
         addBtn.classList.add('flex');
+        timePanel.classList.remove('hidden');
       } else if (currentUserRole === 'advisor') {
         badge.innerText = 'ครูที่ปรึกษา (Advisor)';
         badge.className = 'px-2.5 py-0.5 rounded text-xs font-bold uppercase bg-blue-100 text-blue-800';
         desc.innerText = 'สิทธิ์ครูที่ปรึกษา: ดูข้อมูล, ค้นหา, กรองข้อมูล และส่งออกรายงาน CSV (View & Export Only)';
         addBtn.classList.add('hidden');
         addBtn.classList.remove('flex');
+        timePanel.classList.add('hidden');
       }
     }
 
@@ -959,7 +994,40 @@
       switchTab('register');
     }
 
-    // Render Admin Table
+    async function saveSystemSettings() {
+      const start = document.getElementById('setting-start').value.trim();
+      const end = document.getElementById('setting-end').value.trim();
+      const enabled = document.getElementById('setting-enable').checked;
+
+      if (hasRemote()) {
+        showLoading(true);
+        try {
+          const res = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'saveSettings',
+              pin: adminPin,
+              startTime: start,
+              endTime: end,
+              enabled: enabled
+            })
+          });
+          const r = await res.json();
+          showLoading(false);
+          if (r.status === 'success') {
+            systemSettings = { enabled, startTime: start, endTime: end };
+            updateTimeBanner();
+            alert('บันทึกการตั้งค่าช่วงเวลาเปิด-ปิดเรียบร้อยแล้ว!');
+          } else {
+            alert(r.message || 'บันทึกการตั้งค่าไม่สำเร็จ');
+          }
+        } catch (err) {
+          showLoading(false);
+          alert('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ บันทึกไม่สำเร็จ');
+        }
+      }
+    }
+
     function renderAdminTable() {
       const tbody = document.getElementById('admin-table-body');
       const sortVal = document.getElementById('admin-sort') ? document.getElementById('admin-sort').value : 'time-desc';
@@ -971,7 +1039,6 @@
 
       const cmp = (a, b) => String(a).localeCompare(String(b), 'th', { numeric: true });
 
-      // จัดเรียงลำดับ
       list.sort((a, b) => {
         if (sortVal === 'time-desc') return parseTimestamp(b.timestamp) - parseTimestamp(a.timestamp);
         if (sortVal === 'time-asc') return parseTimestamp(a.timestamp) - parseTimestamp(b.timestamp);
@@ -1024,7 +1091,6 @@
       refreshIcons();
     }
 
-    // Modal Add/Edit Actions
     function openAddStudentModal() {
       document.getElementById('modal-student-title').innerText = 'เพิ่มข้อมูลนักเรียน';
       document.getElementById('edit-original-id').value = '';
